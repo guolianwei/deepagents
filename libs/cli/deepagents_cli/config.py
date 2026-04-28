@@ -1803,6 +1803,9 @@ def detect_provider(model_name: str) -> str | None:
     if model_lower.startswith(("nemotron", "nvidia/")):
         return "nvidia"
 
+    if model_lower.startswith("minimax"):
+        return "anthropic"
+
     return None
 
 

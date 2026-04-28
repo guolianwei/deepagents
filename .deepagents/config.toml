@@ -1,0 +1,25 @@
+[models]
+    default = "anthropic:MiniMax-M2.7-highspeed"
+    recent = "anthropic:MiniMax-M2.7-highspeed"
+
+[models.providers.anthropic]
+    models = [
+        "MiniMax-M2.7-highspeed",
+    ]
+    api_key_env = "ANTHROPIC_AUTH_TOKEN"
+    base_url = "https://api.minimaxi.com/anthropic"
+    class_path = "deepagents_cli._minimax_model:MiniMaxChatModel"
+    enabled = true
+
+[providers.anthropic]
+    class_path = "deepagents_cli._minimax_model:MiniMaxChatModel"
+    base_url = "https://api.minimaxi.com/anthropic"
+    api_key_env = "ANTHROPIC_AUTH_TOKEN"
+
+[warnings]
+suppress = [
+    "tavily",
+]
+
+[agents]
+recent = "agent"

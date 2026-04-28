@@ -1,0 +1,1 @@
+1. 需要将confing.toml 和.env文件拷贝到~/.deepagents目录下，设置ANTHROPIC_AUTH_TOKEN和ANTHROPIC_BASE_URL

@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: deepagents_cli",
+      "type": "python",
+      "request": "launch",
+      "module": "deepagents_cli",
+      "python": "${workspaceFolder}/libs/cli/.venv/Scripts/python.exe",
+      "cwd": "${workspaceFolder}/libs/cli",
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": false,
+      "subProcess": false
+    }
+  ]
+}

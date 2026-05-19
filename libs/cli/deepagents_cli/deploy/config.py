@@ -25,10 +25,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, get_args
 
-SandboxProvider = Literal["none", "daytona", "langsmith", "modal", "runloop"]
+SandboxProvider = Literal["none", "daytona", "langsmith", "modal", "runloop", "docker"]
 """Valid sandbox provider identifiers."""
 
-SandboxScope = Literal["thread", "assistant"]
+SandboxScope = Literal["thread", "assistant", "user"]
 """Valid sandbox scope values."""
 
 VALID_SANDBOX_PROVIDERS: frozenset[str] = frozenset(get_args(SandboxProvider))
@@ -114,7 +114,11 @@ class SandboxConfig:
         different sandboxes; the same thread reuses across turns.
     - `"assistant"`: one sandbox per assistant. All threads of the same
         assistant share a single sandbox and its filesystem.
+    - `"user"`: one sandbox per assistant and authenticated user identity.
     """
+
+    base_dir: str = "/workspace"
+    """The base working directory for the sandbox."""
 
 
 @dataclass(frozen=True)
@@ -365,7 +369,7 @@ def load_config(config_path: Path) -> DeployConfig:
 
 _ALLOWED_SECTIONS = frozenset({"agent", "sandbox", "auth"})
 _ALLOWED_AGENT_KEYS = frozenset({"name", "description", "model"})
-_ALLOWED_SANDBOX_KEYS = frozenset({"provider", "template", "image", "scope"})
+_ALLOWED_SANDBOX_KEYS = frozenset({"provider", "template", "image", "scope", "base_dir"})
 _ALLOWED_AUTH_KEYS = frozenset({"provider"})
 
 
@@ -554,7 +558,7 @@ model = "anthropic:claude-sonnet-4-6"
 # [sandbox] is optional. Omit if not needed for skills or code execution.
 # [sandbox]
 # provider = "langsmith"   # langsmith | daytona | modal | runloop
-# scope = "thread"         # thread | assistant
+# scope = "thread"         # thread | assistant | user
 
 # [auth] is optional. Add to enable user authentication.
 # [auth]

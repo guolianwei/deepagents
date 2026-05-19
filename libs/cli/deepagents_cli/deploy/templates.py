@@ -178,6 +178,67 @@ def _get_or_create_sandbox(cache_key):
 '''
 """Sandbox creation block for the Runloop provider."""
 
+SANDBOX_BLOCK_DOCKER = '''\
+from deepagents.backends.docker import DockerSandbox
+
+_SANDBOXES: dict = {}
+
+
+def _container_name(cache_key: str) -> str:
+    import hashlib
+
+    digest = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:24]
+    return f"deepagents-sandbox-{digest}"
+
+
+def _get_or_create_sandbox(cache_key):
+    if cache_key in _SANDBOXES:
+        return _SANDBOXES[cache_key]
+
+    import docker
+
+    client = docker.from_env()
+    name = _container_name(cache_key)
+
+    containers = client.containers.list(
+        all=True,
+        filters={
+            "label": [
+                "deepagents.sandbox=true",
+                f"deepagents.cache_key={cache_key}",
+            ],
+        },
+    )
+
+    if containers:
+        container = containers[0]
+        if container.status != "running":
+            container.start()
+    else:
+        container = client.containers.run(
+            SANDBOX_IMAGE,
+            command="sleep infinity",
+            detach=True,
+            name=name,
+            working_dir=SANDBOX_BASE_DIR,
+            labels={
+                "deepagents.sandbox": "true",
+                "deepagents.cache_key": cache_key,
+            },
+            mem_limit="1g",
+            pids_limit=256,
+            network_disabled=True,
+            cap_drop=["ALL"],
+            security_opt=["no-new-privileges"],
+        )
+
+    backend = DockerSandbox(container=container, workdir=SANDBOX_BASE_DIR)
+    _SANDBOXES[cache_key] = backend
+    logger.info("Created/reused Docker sandbox %s for key %s", container.id, cache_key)
+    return backend
+'''
+"""Sandbox creation block for the Docker provider."""
+
 SANDBOX_BLOCK_NONE = '''\
 from deepagents.backends.state import StateBackend
 
@@ -198,6 +259,7 @@ SANDBOX_BLOCKS = {
     "daytona": (SANDBOX_BLOCK_DAYTONA, "langchain-daytona"),
     "modal": (SANDBOX_BLOCK_MODAL, "langchain-modal"),
     "runloop": (SANDBOX_BLOCK_RUNLOOP, "langchain-runloop"),
+    "docker": (SANDBOX_BLOCK_DOCKER, "docker"),
     "none": (SANDBOX_BLOCK_NONE, None),
 }
 """Map of `provider -> (sandbox_block, requires_partner_package)`."""
@@ -550,6 +612,7 @@ logger = logging.getLogger(__name__)
 
 SANDBOX_SNAPSHOT = {sandbox_snapshot!r}
 SANDBOX_IMAGE = {sandbox_image!r}
+SANDBOX_BASE_DIR = {sandbox_base_dir!r}
 
 # Mount points inside the composite backend.
 # Everything lives under /memories/ — longest-prefix-first routing
@@ -762,6 +825,16 @@ def _make_user_namespace_factory(assistant_id: str):
     return _factory
 
 
+def _get_user_identity(ctx):
+    server_info = getattr(ctx, "server_info", None)
+    user = getattr(server_info, "user", None) if server_info else None
+    identity = getattr(user, "identity", None) if user else None
+    if not identity:
+        msg = "user identity is required when sandbox scope is 'user'"
+        raise ValueError(msg)
+    return str(identity)
+
+
 SANDBOX_SCOPE = {sandbox_scope!r}
 
 
@@ -772,6 +845,9 @@ def _build_backend_factory(assistant_id: str):
 
         if SANDBOX_SCOPE == "assistant":
             cache_key = f"assistant:{{assistant_id}}"
+        elif SANDBOX_SCOPE == "user":
+            user_id = _get_user_identity(ctx)
+            cache_key = f"user:{{assistant_id}}:{{user_id}}"
         else:
             thread_id = get_config().get("configurable", {{}}).get("thread_id", "local")
             cache_key = f"thread:{{thread_id}}"

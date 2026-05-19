@@ -267,6 +267,7 @@ def _build_server_env() -> dict[str, str]:
     """
     env = os.environ.copy()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     env["LANGGRAPH_AUTH_TYPE"] = "noop"
     for key in (
         "LANGGRAPH_AUTH",

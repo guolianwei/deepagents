@@ -1,0 +1,12 @@
+[agent]
+name = "deepagents-deploy-docker-user-sandbox"
+model = "anthropic:claude-sonnet-4-6"
+
+[sandbox]
+provider = "docker"
+scope = "user"
+image = "python:3.12-slim"
+base_dir = "/workspace"
+
+[auth]
+provider = "supabase"

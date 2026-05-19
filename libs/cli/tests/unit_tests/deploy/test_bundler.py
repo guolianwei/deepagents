@@ -48,10 +48,18 @@ def _minimal_config(
     provider: str = "none",
     model: str = "anthropic:claude-sonnet-4-6",
     auth: AuthConfig | None = None,
+    scope: str = "thread",
+    image: str = "python:3",
+    base_dir: str = "/workspace",
 ) -> DeployConfig:
     return DeployConfig(
         agent=AgentConfig(name="test-agent", model=model),
-        sandbox=SandboxConfig(provider=provider),  # type: ignore[arg-type]
+        sandbox=SandboxConfig(  # type: ignore[arg-type]
+            provider=provider,
+            scope=scope,
+            image=image,
+            base_dir=base_dir,
+        ),
         auth=auth,
     )
 
@@ -223,6 +231,44 @@ class TestRenderDeployGraph:
             config = _minimal_config(provider=provider)
             result = _render_deploy_graph(config, mcp_present=False)
             compile(result, f"<deploy_graph_{provider}>", "exec")
+
+    def test_user_scope_cache_key_branch_renders(self) -> None:
+        config = _minimal_config(scope="user")
+        result = _render_deploy_graph(config, mcp_present=False)
+
+        assert "def _get_user_identity(ctx):" in result
+        assert "SANDBOX_SCOPE = 'user'" in result
+        assert 'cache_key = f"user:{assistant_id}:{user_id}"' in result
+        assert "user identity is required when sandbox scope is 'user'" in result
+
+    def test_sandbox_sync_forwards_server_info_to_backend_factory(self) -> None:
+        config = _minimal_config(scope="user")
+        result = _render_deploy_graph(config, mcp_present=False)
+
+        assert 'server_info=getattr(runtime, "server_info", None)' in result
+
+    def test_docker_block_uses_image_base_dir_labels_and_cache(self) -> None:
+        config = _minimal_config(
+            provider="docker",
+            image="python:3.12-slim",
+            base_dir="/workspace",
+        )
+        result = _render_deploy_graph(config, mcp_present=False)
+
+        assert "from deepagents.backends.docker import DockerSandbox" in result
+        assert "SANDBOX_IMAGE = 'python:3.12-slim'" in result
+        assert "SANDBOX_BASE_DIR = '/workspace'" in result
+        assert 'return f"deepagents-sandbox-{digest}"' in result
+        assert '"deepagents.sandbox": "true"' in result
+        assert '"deepagents.cache_key": cache_key' in result
+        assert "working_dir=SANDBOX_BASE_DIR" in result
+        assert "workdir=SANDBOX_BASE_DIR" in result
+
+    def test_docker_pyproject_includes_docker_dependency(self) -> None:
+        config = _minimal_config(provider="docker")
+        result = _render_pyproject(config, mcp_present=False)
+
+        assert '"docker[ssh]>=7.0.0,<8.0.0",' in result
 
     def test_langsmith_block_uses_snapshot_api(self) -> None:
         """Generated langsmith block must reference the snapshot API surface.

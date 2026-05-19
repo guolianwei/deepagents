@@ -713,6 +713,213 @@ uv run --group test pytest libs/cli/tests/unit_tests/deploy
 - 文档明确安全边界和非目标。
 - 有最小可复制配置片段。
 
+#### 阶段 5 当前同步结果
+
+当前已将检验结果和阶段 5 文档产物同步到仓库，包括：
+
+- deploy 配置和模板的当前代码支持范围。
+- `BaseSandbox` / `LangSmithSandbox` 对 `DockerSandbox` 的可扩展性依据。
+- deploy 单元测试和 SDK backend 单元测试的基线结果。
+- `uv` 依赖下载超时的修复方式。
+- 使用 SSH 访问远端 Docker daemon 的验证结果。
+- 用户向配置、迁移和运维说明：`docs/docker-user-scope-sandbox.md`。
+- 最小 deploy 示例：`examples/deploy-docker-user-sandbox/`。
+- examples 索引：`examples/README.md`。
+
+当前工作树已包含 `scope = "user"`、`DockerSandbox`、`provider = "docker"`、
+`base_dir` 和 Docker SSH 依赖的实现改动。合并前仍需要用最终代码再校准文档中的
+错误文案、默认值和测试命令。
+
+#### 使用者文档草案
+
+##### 什么时候选择不同 scope
+
+| scope | 复用粒度 | 适用场景 | 风险 |
+| --- | --- | --- | --- |
+| `thread` | 一个 `thread_id` 一个 sandbox | 默认选项；每个会话线程隔离 | 同一用户多个 thread 不共享文件 |
+| `assistant` | 一个 assistant 一个 sandbox | 单租户、内部演示、所有线程共享工作区 | 多用户部署时会共享同一个 sandbox，不适合作为用户隔离 |
+| `user` | 一个 `assistant_id + user identity` 一个 sandbox | 多用户部署；同一用户跨 thread 共享工作区 | 必须启用 auth，并且 user identity 必须稳定可信 |
+
+`scope = "user"` 的核心语义：
+
+```text
+assistant A + user 1 + thread 1 -> sandbox user:assistant-A:user-1
+assistant A + user 1 + thread 2 -> sandbox user:assistant-A:user-1
+assistant A + user 2 + thread 1 -> sandbox user:assistant-A:user-2
+```
+
+因此它解决的是“同一个用户多个 thread 共享同一个沙箱，不同用户使用不同沙箱”。
+
+##### 最小配置示例
+
+目标配置：
+
+```toml
+[agent]
+name = "my-agent"
+model = "anthropic:claude-sonnet-4-6"
+
+[sandbox]
+provider = "docker"
+scope = "user"
+image = "python:3.12-slim"
+base_dir = "/workspace"
+
+[auth]
+provider = "supabase"
+```
+
+如果只想先验证 Docker provider，而不启用用户级复用，可用：
+
+```toml
+[sandbox]
+provider = "docker"
+scope = "thread"
+image = "python:3.12-slim"
+base_dir = "/workspace"
+```
+
+如果 `scope = "user"` 但没有配置 auth，或运行时没有注入 user identity，运行时应明确失败：
+
+```text
+user identity is required when sandbox scope is 'user'
+```
+
+##### Docker provider 运行前提
+
+Docker provider 需要运行 deploy graph 的 Python 进程能够访问 Docker daemon。
+推荐的开发和自托管方式是使用 Docker SSH transport，而不是开放 Docker 明文 TCP 端口。
+
+本工程当前已验证的开发环境：
+
+```powershell
+$env:DOCKER_HOST = "ssh://deepagents-docker"
+```
+
+验证命令：
+
+```powershell
+ssh -o BatchMode=yes deepagents-docker "hostname && docker version --format '{{.Server.Version}}'"
+```
+
+已验证输出：
+
+```text
+aibot
+28.4.0
+```
+
+对应本地记录文件：
+
+- `.codex/docker-ssh.md`
+
+Docker provider 当前依赖：
+
+```toml
+docker[ssh] >= 7.0.0, < 8.0.0
+```
+
+当前工作树采用的依赖声明：
+
+- CLI extra：`deepagents-cli[docker]`
+- all-sandboxes extra 包含 `docker`
+- deploy bundle 在 `provider = "docker"` 时注入 `docker[ssh]>=7.0.0,<8.0.0`
+
+如果后续 `DockerSandbox` 被作为 SDK 稳定一等 backend 对外推荐，再考虑补 SDK 侧
+`deepagents[docker]` optional extra。
+
+##### Docker SSH 而不是 2375
+
+不要在开发服务器上开放未认证的 Docker TCP：
+
+```text
+tcp://0.0.0.0:2375
+```
+
+原因是未保护的 Docker API 基本等同于暴露宿主机 root 级控制能力。
+
+推荐使用：
+
+```text
+DOCKER_HOST=ssh://deepagents-docker
+```
+
+如果生产环境必须使用 TCP，应使用 TLS 保护的 `2376`，并通过防火墙限制来源 IP。
+本需求当前不需要开放 `2375` 或 `2376`。
+
+##### 安全边界说明
+
+`provider = "docker"` 提供容器级隔离，但不是完整的强安全沙箱。默认实现必须遵守：
+
+- 不挂载宿主机敏感目录。
+- 不挂载 `/var/run/docker.sock`。
+- 不使用 privileged 容器。
+- 默认 drop capabilities。
+- 默认启用 `no-new-privileges`。
+- 默认限制 memory、pids、CPU。
+- 默认禁用网络，除非用户显式开启。
+- 容器名使用 hash，不直接暴露原始 user id。
+
+第一版可以先固定保守默认值，配置化资源限制和网络开关可放入阶段 6。
+
+##### 从现有配置迁移
+
+从无沙箱迁移：
+
+```toml
+[sandbox]
+provider = "none"
+```
+
+改为：
+
+```toml
+[sandbox]
+provider = "docker"
+scope = "thread"
+image = "python:3.12-slim"
+base_dir = "/workspace"
+```
+
+先使用 `scope = "thread"` 验证 Docker provider 可用，再切到 `scope = "user"`。
+
+从 assistant 级沙箱迁移：
+
+```toml
+[sandbox]
+provider = "langsmith"
+scope = "assistant"
+```
+
+如果是多用户部署，不建议直接保持 `assistant` scope。应改为：
+
+```toml
+[sandbox]
+provider = "docker"
+scope = "user"
+image = "python:3.12-slim"
+base_dir = "/workspace"
+```
+
+并确认：
+
+- 已配置 `[auth]`。
+- `runtime.user.identity` 在每次请求中稳定存在。
+- 同一用户多个 thread 的文件复用是预期行为。
+- 不同用户不能读取彼此容器中的文件。
+
+##### 文档最终校准清单
+
+阶段 1-4 合入后，需要回头校准以下内容：
+
+- `deepagents.toml` 是否继续使用 `base_dir` 作为字段名。
+- Docker SDK 依赖是否继续只在 CLI/deploy bundle 侧声明。
+- `scope = "user"` 缺少身份时的最终错误文案。
+- Docker 默认镜像是否仍沿用当前 `python:3`，示例是否继续使用 `python:3.12-slim`。
+- 默认是否继续禁用网络。
+- 资源限制默认值是否继续为 `mem_limit="1g"`、`pids_limit=256`。
+- 端到端测试是否需要真实 Docker daemon，还是提供 fake provider 覆盖大部分逻辑。
+
 ### 阶段 6：安全加固和容器生命周期管理
 
 目标：在功能可用后补齐生产运行需要的安全和运维能力。

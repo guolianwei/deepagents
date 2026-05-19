@@ -108,10 +108,11 @@ all-providers = [
 # Sandbox providers
 agentcore = ["langchain-agentcore-codeinterpreter>=0.0.1"]
 daytona = ["langchain-daytona>=0.0.4"]
+docker = ["docker[ssh]>=7.0.0,<8.0.0"]
 modal = ["langchain-modal>=0.0.2"]
 runloop = ["langchain-runloop>=0.0.3"]
 all-sandboxes = [
-    "deepagents-cli[agentcore,daytona,modal,runloop]",
+    "deepagents-cli[agentcore,daytona,docker,modal,runloop]",
 ]
 
 

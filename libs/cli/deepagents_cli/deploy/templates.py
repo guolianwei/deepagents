@@ -178,7 +178,7 @@ def _get_or_create_sandbox(cache_key):
 '''
 """Sandbox creation block for the Runloop provider."""
 
-SANDBOX_BLOCK_DOCKER = '''\
+SANDBOX_BLOCK_DOCKER = """\
 from deepagents.backends.docker import DockerSandbox
 
 _SANDBOXES: dict = {}
@@ -236,7 +236,7 @@ def _get_or_create_sandbox(cache_key):
     _SANDBOXES[cache_key] = backend
     logger.info("Created/reused Docker sandbox %s for key %s", container.id, cache_key)
     return backend
-'''
+"""
 """Sandbox creation block for the Docker provider."""
 
 SANDBOX_BLOCK_NONE = '''\
@@ -259,7 +259,7 @@ SANDBOX_BLOCKS = {
     "daytona": (SANDBOX_BLOCK_DAYTONA, "langchain-daytona"),
     "modal": (SANDBOX_BLOCK_MODAL, "langchain-modal"),
     "runloop": (SANDBOX_BLOCK_RUNLOOP, "langchain-runloop"),
-    "docker": (SANDBOX_BLOCK_DOCKER, "docker"),
+    "docker": (SANDBOX_BLOCK_DOCKER, "docker[ssh]>=7.0.0,<8.0.0"),
     "none": (SANDBOX_BLOCK_NONE, None),
 }
 """Map of `provider -> (sandbox_block, requires_partner_package)`."""
@@ -649,6 +649,7 @@ class SandboxSyncMiddleware(AgentMiddleware):
                 store=runtime.store,
                 config=config,
                 tool_call_id=None,
+                server_info=getattr(runtime, "server_info", None),
             )
             return self._backend(tool_runtime)
         return self._backend

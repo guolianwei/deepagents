@@ -25,7 +25,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, get_args
 
-SandboxProvider = Literal["none", "daytona", "langsmith", "modal", "runloop", "docker"]
+SandboxProvider = Literal[
+    "none",
+    "daytona",
+    "langsmith",
+    "modal",
+    "runloop",
+    "docker",
+]
 """Valid sandbox provider identifiers."""
 
 SandboxScope = Literal["thread", "assistant", "user"]
@@ -369,7 +376,9 @@ def load_config(config_path: Path) -> DeployConfig:
 
 _ALLOWED_SECTIONS = frozenset({"agent", "sandbox", "auth"})
 _ALLOWED_AGENT_KEYS = frozenset({"name", "description", "model"})
-_ALLOWED_SANDBOX_KEYS = frozenset({"provider", "template", "image", "scope", "base_dir"})
+_ALLOWED_SANDBOX_KEYS = frozenset(
+    {"provider", "template", "image", "scope", "base_dir"}
+)
 _ALLOWED_AUTH_KEYS = frozenset({"provider"})
 
 
@@ -557,8 +566,9 @@ model = "anthropic:claude-sonnet-4-6"
 
 # [sandbox] is optional. Omit if not needed for skills or code execution.
 # [sandbox]
-# provider = "langsmith"   # langsmith | daytona | modal | runloop
+# provider = "langsmith"   # langsmith | daytona | docker | modal | runloop
 # scope = "thread"         # thread | assistant | user
+# base_dir = "/workspace"  # used by provider = "docker"
 
 # [auth] is optional. Add to enable user authentication.
 # [auth]

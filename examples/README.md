@@ -19,6 +19,7 @@
 | [text-to-sql-agent](text-to-sql-agent/) | Natural language to SQL agent with planning, skill-based workflows, and the Chinook demo database |
 | [deploy-coding-agent](deploy-coding-agent/) | `deepagents deploy` example: autonomous coding agent with a LangSmith sandbox for code execution |
 | [deploy-content-writer](deploy-content-writer/) | `deepagents deploy` example: content writing agent with per-user memory and Supabase auth |
+| [deploy-docker-user-sandbox](deploy-docker-user-sandbox/) | `deepagents deploy` example: one reusable Docker sandbox per authenticated user |
 | [deploy-mcp-docs-agent](deploy-mcp-docs-agent/) | `deepagents deploy` example: docs research agent that uses MCP tools to search LangChain documentation |
 | [deploy-gtm-agent](deploy-gtm-agent/) | `deepagents deploy` example: GTM strategy agent coordinating sync and async subagents |
 | [async-subagent-server](async-subagent-server/) | Self-hosted Agent Protocol server exposing a Deep Agents researcher as an async subagent, with a supervisor REPL |

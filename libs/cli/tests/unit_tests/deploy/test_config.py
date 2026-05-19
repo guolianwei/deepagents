@@ -83,16 +83,19 @@ class TestSandboxConfig:
         assert cfg.template == "deepagents-deploy"
         assert cfg.image == "python:3"
         assert cfg.scope == "thread"
+        assert cfg.base_dir == "/workspace"
 
     def test_custom_values(self) -> None:
         cfg = SandboxConfig(
-            provider="langsmith",
+            provider="docker",
             template="custom",
-            image="node:20",
-            scope="assistant",
+            image="python:3.12-slim",
+            scope="user",
+            base_dir="/app",
         )
-        assert cfg.provider == "langsmith"
-        assert cfg.scope == "assistant"
+        assert cfg.provider == "docker"
+        assert cfg.scope == "user"
+        assert cfg.base_dir == "/app"
 
     def test_frozen(self) -> None:
         cfg = SandboxConfig()
@@ -376,6 +379,9 @@ class TestValidateSandboxCredentials:
         monkeypatch.setenv("LANGCHAIN_API_KEY", "lsv2-test")
         assert _validate_sandbox_credentials("langsmith") == []
 
+    def test_docker_needs_no_api_key(self) -> None:
+        assert _validate_sandbox_credentials("docker") == []
+
 
 class TestValidateAuthCredentials:
     def test_unknown_provider_skips(self) -> None:
@@ -418,6 +424,13 @@ class TestValidateAuthCredentials:
 
 
 class TestStarterTemplates:
+    def test_starter_config_mentions_docker(self) -> None:
+        from deepagents_cli.deploy.config import generate_starter_config
+
+        result = generate_starter_config()
+        assert "docker" in result
+        assert "base_dir" in result
+
     def test_starter_config_mentions_auth(self) -> None:
         from deepagents_cli.deploy.config import generate_starter_config
 

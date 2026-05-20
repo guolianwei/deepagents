@@ -50,79 +50,121 @@ aibot
 
 Do not expose unauthenticated Docker TCP on `0.0.0.0:2375`.
 
-## Deploy
+## Running the FastAPI API Service
+
+We have provided a fully-featured, production-ready REST API service in `server.py` using FastAPI. It handles user registration, secure JWT log-ins, assistant registrations, and dynamically launches or reuses a dedicated, persistent Docker container sandbox per user based on their JWT token credentials.
+
+To run the API service locally:
 
 ```bash
-deepagents deploy
+# Install dependencies and start the FastAPI web server
+uv run uvicorn server:app --port 8000 --reload
 ```
 
-The `[auth]` section generates the Supabase auth handler. The `[sandbox]`
-section creates Docker containers keyed by `assistant_id + user.identity`.
+## How To Interact With The API
 
-## What To Try
+### 1. Register a New User
 
-Run two threads as the same authenticated user:
-
-```text
-Write "hello from user A" to /workspace/user.txt
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username": "alice", "password": "password123"}'
 ```
 
-Then in another thread for the same user:
-
-```text
-Read /workspace/user.txt
+Response:
+```json
+{
+  "id": "usr_9f4a7c12bc34",
+  "username": "alice",
+  "created_at": "2026-05-20T14:30:00Z"
+}
 ```
 
-The file should still be present.
+### 2. Log In and Obtain JWT Access Token
 
-Run a thread as a different authenticated user:
-
-```text
-Read /workspace/user.txt
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "alice", "password": "password123"}'
 ```
 
-The file should not exist because that user gets a different container.
-
-## Query Via SDK
-
-Pass a Supabase JWT in the `Authorization` header. The deployment validates the
-token and uses the authenticated user identity for the sandbox cache key.
-
-```python
-from langgraph_sdk import get_client
-
-client = get_client(
-    url="https://<your-deployment-url>",
-    headers={"Authorization": "Bearer <your-supabase-jwt>"},
-)
-thread = await client.threads.create()
-
-async for chunk in client.runs.stream(
-    thread["thread_id"],
-    "agent",
-    input={
-        "messages": [
-            {
-                "role": "user",
-                "content": "Create /workspace/user.txt with my user id in it.",
-            }
-        ]
-    },
-    stream_mode="messages",
-):
-    print(chunk.data, end="", flush=True)
+Response:
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsIn...",
+  "token_type": "bearer"
+}
 ```
+
+Save your token:
+```bash
+export JWT_TOKEN="eyJhbGciOiJIUzI1NiIsIn..."
+```
+
+### 3. Register/Start an Assistant
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/assistants \
+  -H "Authorization: Bearer $JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "coding-assistant",
+    "name": "Coding Assistant",
+    "model": "anthropic:claude-sonnet-4-6",
+    "image": "python:3.12-slim",
+    "base_dir": "/workspace"
+  }'
+```
+
+### 4. Create a Conversational Thread
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/threads \
+  -H "Authorization: Bearer $JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"assistant_id": "coding-assistant", "name": "Isolated Workspace Thread"}'
+```
+
+Response:
+```json
+{
+  "thread_id": "thd_7b3a9c42de11",
+  "user_id": "usr_9f4a7c12bc34",
+  "assistant_id": "coding-assistant",
+  "name": "Isolated Workspace Thread"
+}
+```
+
+### 5. Chat & Execute Commands in Your Persistent Sandbox
+
+Send a standard message to the assistant:
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/threads/thd_7b3a9c42de11/chat \
+  -H "Authorization: Bearer $JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello! Introduce yourself."}'
+```
+
+Execute a terminal command inside your private Docker container workspace by prefixing your message with `run:`:
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/threads/thd_7b3a9c42de11/chat \
+  -H "Authorization: Bearer $JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "run: pwd && echo \"hello from user alice\" > /workspace/shared.txt && cat /workspace/shared.txt"}'
+```
+
+Because your sandbox is user-scoped:
+- **Same User, Different Thread**: If you create a new thread with `thread_id` `thd_different_999` and run `cat /workspace/shared.txt`, it **will** return `"hello from user alice"`.
+- **Different User**: If another registered user logs in and attempts to access `/workspace/shared.txt`, their request will run inside a completely separate Docker container, resulting in a "No such file or directory" error.
 
 ## Inspect And Clean Up Containers
 
 List Deep Agents sandbox containers:
-
 ```powershell
 ssh deepagents-docker 'docker ps -a --filter label=deepagents.sandbox=true'
 ```
 
 Remove only Deep Agents sandbox containers:
-
 ```powershell
 ssh deepagents-docker 'docker rm -f $(docker ps -aq --filter label=deepagents.sandbox=true)'
 ```
@@ -133,11 +175,13 @@ ssh deepagents-docker 'docker rm -f $(docker ps -aq --filter label=deepagents.sa
 deploy-docker-user-sandbox/
 ├── AGENTS.md          # Agent instructions for the Docker workspace
 ├── README.md          # Setup, deploy, and validation guide
-└── deepagents.toml    # Deploy config with Docker user-scope sandbox
+├── deepagents.toml    # Deploy config with Docker user-scope sandbox
+└── server.py          # FastAPI API service routing threads to user Docker containers
 ```
 
 ## Resources
 
 - [Docker user-scoped sandbox design](../../docs/user-scope-docker-sandbox-design.md)
+- [Docker user-scoped sandbox api service design](../../docs/user-scoped-docker-sandbox-api-service-design.md)
 - [Docker user-scoped sandbox guide](../../docs/docker-user-scope-sandbox.md)
 - [Anthropic models overview](https://platform.claude.com/docs/en/about-claude/models/overview)

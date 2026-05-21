@@ -113,9 +113,16 @@ curl.exe -s http://127.0.0.1:18080/openapi.json | Select-String "DeepAgents User
 ```powershell
 $BaseUrl = "http://127.0.0.1:18080"
 
-$Alice = curl.exe -s -X POST "$BaseUrl/api/v1/auth/register" `
-  -H "Content-Type: application/json" `
-  -d '{"username":"alice-tutorial","password":"pass-12345"}' | ConvertFrom-Json
+$AliceBody = @{
+  username = "alice-tutorial"
+  password = "pass-12345"
+} | ConvertTo-Json
+
+$Alice = Invoke-RestMethod `
+  -Method Post `
+  -Uri "$BaseUrl/api/v1/auth/register" `
+  -ContentType "application/json" `
+  -Body $AliceBody
 
 $Alice
 ```
@@ -131,9 +138,16 @@ created_at: ...
 ## 7. Alice 登录
 
 ```powershell
-$AliceLogin = curl.exe -s -X POST "$BaseUrl/api/v1/auth/login" `
-  -H "Content-Type: application/json" `
-  -d '{"username":"alice-tutorial","password":"pass-12345"}' | ConvertFrom-Json
+$AliceLoginBody = @{
+  username = "alice-tutorial"
+  password = "pass-12345"
+} | ConvertTo-Json
+
+$AliceLogin = Invoke-RestMethod `
+  -Method Post `
+  -Uri "$BaseUrl/api/v1/auth/login" `
+  -ContentType "application/json" `
+  -Body $AliceLoginBody
 
 $AliceToken = $AliceLogin.access_token
 $AliceToken.Length
@@ -145,17 +159,22 @@ $AliceToken.Length
 
 ```powershell
 $AssistantId = "minimax-coder-tutorial"
+$AliceHeaders = @{ Authorization = "Bearer $AliceToken" }
 
-$Assistant = curl.exe -s -X POST "$BaseUrl/api/v1/assistants" `
-  -H "Authorization: Bearer $AliceToken" `
-  -H "Content-Type: application/json" `
-  -d "{
-    `"id`": `"$AssistantId`",
-    `"name`": `"Minimax Coder Tutorial`",
-    `"model`": `"anthropic:MiniMax-M2.7-highspeed`",
-    `"image`": `"python:3.12-slim`",
-    `"base_dir`": `"/workspace`"
-  }" | ConvertFrom-Json
+$AssistantBody = @{
+  id = $AssistantId
+  name = "Minimax Coder Tutorial"
+  model = "anthropic:MiniMax-M2.7-highspeed"
+  image = "python:3.12-slim"
+  base_dir = "/workspace"
+} | ConvertTo-Json
+
+$Assistant = Invoke-RestMethod `
+  -Method Post `
+  -Uri "$BaseUrl/api/v1/assistants" `
+  -Headers $AliceHeaders `
+  -ContentType "application/json" `
+  -Body $AssistantBody
 
 $Assistant
 ```
@@ -169,26 +188,79 @@ status: active
 
 ## 9. 创建 Alice 的第一个 Thread
 
+这一步必须先创建 Thread 请求体 `$AliceThread1Body`。不要使用第 10 步的 `$Chat1Body`，否则服务端会收到空 body 或错误结构。
+
 ```powershell
-$AliceThread1 = curl.exe -s -X POST "$BaseUrl/api/v1/threads" `
-  -H "Authorization: Bearer $AliceToken" `
-  -H "Content-Type: application/json" `
-  -d "{
-    `"assistant_id`": `"$AssistantId`",
-    `"name`": `"alice-thread-1`"
-  }" | ConvertFrom-Json
+if (-not $AssistantId) { throw "AssistantId is empty. Run step 8 first." }
+if (-not $AliceHeaders.Authorization) { throw "AliceHeaders is empty. Run step 7 and step 8 first." }
+
+$AliceThread1Body = @{
+  assistant_id = $AssistantId
+  name = "alice-thread-1"
+} | ConvertTo-Json -Compress
+
+$AliceThread1Body
+
+$AliceThread1 = Invoke-RestMethod `
+  -Method Post `
+  -Uri "$BaseUrl/api/v1/threads" `
+  -Headers $AliceHeaders `
+  -ContentType "application/json" `
+  -Body $AliceThread1Body
 
 $AliceThreadId1 = $AliceThread1.thread_id
 $AliceThread1
 ```
 
+执行 `$AliceThread1Body` 时应先看到类似下面的 JSON：
+
+```json
+{"name":"alice-thread-1","assistant_id":"minimax-coder-tutorial"}
+```
+
+如果返回：
+
+```text
+{"detail":[{"type":"missing","loc":["body"],"msg":"Field required","input":null}]}
+```
+
+说明 `-Body` 后面的变量是 `$null`，通常是跳过了 `$AliceThread1Body = ...` 这几行，或者把第 10 步的 `$Chat1Body` 和本步骤混用了。
+
 ## 10. 发送普通 Agent 对话
 
+这一步必须在第 9 步成功后执行，因为 URL 里需要 `$AliceThreadId1`。
+
+如果消息里包含中文，并且你使用的是 Windows PowerShell 5.1，先设置当前控制台为 UTF-8：
+
 ```powershell
-$Chat1 = curl.exe -s -X POST "$BaseUrl/api/v1/threads/$AliceThreadId1/chat" `
-  -H "Authorization: Bearer $AliceToken" `
-  -H "Content-Type: application/json" `
-  -d '{"message":"Reply with exactly: api-agent-ok"}' | ConvertFrom-Json
+chcp 65001
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+```
+
+然后用 UTF-8 字节发送请求，并用 `Invoke-WebRequest -UseBasicParsing` 读取原始响应。`-UseBasicParsing` 用于避免 Windows PowerShell 5.1 的网页脚本解析安全提示。
+
+```powershell
+if (-not $AliceThreadId1) { throw "AliceThreadId1 is empty. Run step 9 first." }
+
+$Chat1Body = @{
+  message = "Reply with exactly: api-agent-ok  我是一个测试"
+} | ConvertTo-Json -Compress
+
+$Chat1Body
+$Chat1BodyBytes = [System.Text.Encoding]::UTF8.GetBytes($Chat1Body)
+
+$Raw = Invoke-WebRequest `
+  -Method Post `
+  -Uri "$BaseUrl/api/v1/threads/$AliceThreadId1/chat" `
+  -Headers $AliceHeaders `
+  -ContentType "application/json; charset=utf-8" `
+  -Body $Chat1BodyBytes `
+  -UseBasicParsing
+
+$JsonText = [System.Text.Encoding]::UTF8.GetString($Raw.RawContentStream.ToArray())
+$Chat1 = $JsonText | ConvertFrom-Json
 
 $Chat1.response
 $Chat1.container_id
@@ -197,7 +269,7 @@ $Chat1.container_id
 期望响应包含：
 
 ```text
-api-agent-ok
+api-agent-ok 我是一个测试
 [Sandbox Active]
 ```
 
@@ -211,10 +283,16 @@ api-agent-ok
 以 `run:` 开头的消息会进入 Docker 容器执行。
 
 ```powershell
-$AliceRun1 = curl.exe -s -X POST "$BaseUrl/api/v1/threads/$AliceThreadId1/chat" `
-  -H "Authorization: Bearer $AliceToken" `
-  -H "Content-Type: application/json" `
-  -d '{"message":"run: python --version && echo alice-secret-data > /workspace/shared.txt && cat /workspace/shared.txt"}' | ConvertFrom-Json
+$AliceRun1Body = @{
+  message = "run: python --version && echo alice-secret-data > /workspace/shared.txt && cat /workspace/shared.txt"
+} | ConvertTo-Json
+
+$AliceRun1 = Invoke-RestMethod `
+  -Method Post `
+  -Uri "$BaseUrl/api/v1/threads/$AliceThreadId1/chat" `
+  -Headers $AliceHeaders `
+  -ContentType "application/json" `
+  -Body $AliceRun1Body
 
 $AliceRun1.response
 $AliceContainerId = $AliceRun1.container_id
@@ -233,13 +311,17 @@ alice-secret-data
 ## 12. 创建 Alice 的第二个 Thread
 
 ```powershell
-$AliceThread2 = curl.exe -s -X POST "$BaseUrl/api/v1/threads" `
-  -H "Authorization: Bearer $AliceToken" `
-  -H "Content-Type: application/json" `
-  -d "{
-    `"assistant_id`": `"$AssistantId`",
-    `"name`": `"alice-thread-2`"
-  }" | ConvertFrom-Json
+$AliceThread2Body = @{
+  assistant_id = $AssistantId
+  name = "alice-thread-2"
+} | ConvertTo-Json
+
+$AliceThread2 = Invoke-RestMethod `
+  -Method Post `
+  -Uri "$BaseUrl/api/v1/threads" `
+  -Headers $AliceHeaders `
+  -ContentType "application/json" `
+  -Body $AliceThread2Body
 
 $AliceThreadId2 = $AliceThread2.thread_id
 ```
@@ -247,10 +329,16 @@ $AliceThreadId2 = $AliceThread2.thread_id
 ## 13. 验证同一用户跨 Thread 复用沙箱
 
 ```powershell
-$AliceRun2 = curl.exe -s -X POST "$BaseUrl/api/v1/threads/$AliceThreadId2/chat" `
-  -H "Authorization: Bearer $AliceToken" `
-  -H "Content-Type: application/json" `
-  -d '{"message":"run: cat /workspace/shared.txt"}' | ConvertFrom-Json
+$AliceRun2Body = @{
+  message = "run: cat /workspace/shared.txt"
+} | ConvertTo-Json
+
+$AliceRun2 = Invoke-RestMethod `
+  -Method Post `
+  -Uri "$BaseUrl/api/v1/threads/$AliceThreadId2/chat" `
+  -Headers $AliceHeaders `
+  -ContentType "application/json" `
+  -Body $AliceRun2Body
 
 $AliceRun2.response
 $AliceRun2.container_id
@@ -269,27 +357,46 @@ True
 ## 14. 注册 Bob
 
 ```powershell
-$Bob = curl.exe -s -X POST "$BaseUrl/api/v1/auth/register" `
-  -H "Content-Type: application/json" `
-  -d '{"username":"bob-tutorial","password":"pass-12345"}' | ConvertFrom-Json
+$BobBody = @{
+  username = "bob-tutorial"
+  password = "pass-12345"
+} | ConvertTo-Json
 
-$BobLogin = curl.exe -s -X POST "$BaseUrl/api/v1/auth/login" `
-  -H "Content-Type: application/json" `
-  -d '{"username":"bob-tutorial","password":"pass-12345"}' | ConvertFrom-Json
+$Bob = Invoke-RestMethod `
+  -Method Post `
+  -Uri "$BaseUrl/api/v1/auth/register" `
+  -ContentType "application/json" `
+  -Body $BobBody
+
+$BobLoginBody = @{
+  username = "bob-tutorial"
+  password = "pass-12345"
+} | ConvertTo-Json
+
+$BobLogin = Invoke-RestMethod `
+  -Method Post `
+  -Uri "$BaseUrl/api/v1/auth/login" `
+  -ContentType "application/json" `
+  -Body $BobLoginBody
 
 $BobToken = $BobLogin.access_token
+$BobHeaders = @{ Authorization = "Bearer $BobToken" }
 ```
 
 ## 15. Bob 创建 Thread
 
 ```powershell
-$BobThread1 = curl.exe -s -X POST "$BaseUrl/api/v1/threads" `
-  -H "Authorization: Bearer $BobToken" `
-  -H "Content-Type: application/json" `
-  -d "{
-    `"assistant_id`": `"$AssistantId`",
-    `"name`": `"bob-thread-1`"
-  }" | ConvertFrom-Json
+$BobThread1Body = @{
+  assistant_id = $AssistantId
+  name = "bob-thread-1"
+} | ConvertTo-Json
+
+$BobThread1 = Invoke-RestMethod `
+  -Method Post `
+  -Uri "$BaseUrl/api/v1/threads" `
+  -Headers $BobHeaders `
+  -ContentType "application/json" `
+  -Body $BobThread1Body
 
 $BobThreadId1 = $BobThread1.thread_id
 ```
@@ -297,10 +404,16 @@ $BobThreadId1 = $BobThread1.thread_id
 ## 16. 验证 Bob 不能读取 Alice 文件
 
 ```powershell
-$BobRun1 = curl.exe -s -X POST "$BaseUrl/api/v1/threads/$BobThreadId1/chat" `
-  -H "Authorization: Bearer $BobToken" `
-  -H "Content-Type: application/json" `
-  -d '{"message":"run: cat /workspace/shared.txt"}' | ConvertFrom-Json
+$BobRun1Body = @{
+  message = "run: cat /workspace/shared.txt"
+} | ConvertTo-Json
+
+$BobRun1 = Invoke-RestMethod `
+  -Method Post `
+  -Uri "$BaseUrl/api/v1/threads/$BobThreadId1/chat" `
+  -Headers $BobHeaders `
+  -ContentType "application/json" `
+  -Body $BobRun1Body
 
 $BobRun1.response
 $BobContainerId = $BobRun1.container_id
@@ -320,8 +433,10 @@ True
 ## 17. 查看 API 记录的沙箱
 
 ```powershell
-$Sandboxes = curl.exe -s -X GET "$BaseUrl/api/v1/sandboxes" `
-  -H "Authorization: Bearer $AliceToken" | ConvertFrom-Json
+$Sandboxes = Invoke-RestMethod `
+  -Method Get `
+  -Uri "$BaseUrl/api/v1/sandboxes" `
+  -Headers $AliceHeaders
 
 $Sandboxes
 ```

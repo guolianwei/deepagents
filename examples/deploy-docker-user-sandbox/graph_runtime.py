@@ -4,10 +4,14 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import types
+from pathlib import Path
 from typing import Any
 
 from assistants import _get_or_compile_sandbox_factory
+
+ENABLE_MODEL_ENV = "DEEPAGENTS_SANDBOX_API_ENABLE_MODEL"
 
 
 def _ctx(identity: str) -> types.SimpleNamespace:
@@ -24,6 +28,73 @@ def _ctx(identity: str) -> types.SimpleNamespace:
             user=types.SimpleNamespace(identity=identity),
         ),
     )
+
+
+def _content_to_text(content: Any) -> str:
+    """Normalize provider response content into user-facing text.
+
+    Args:
+        content: A LangChain message content value.
+
+    Returns:
+        Text content, with provider reasoning blocks omitted when possible.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                text_parts.append(item)
+            elif isinstance(item, dict) and item.get("type") == "text":
+                text = item.get("text")
+                if isinstance(text, str):
+                    text_parts.append(text)
+        if text_parts:
+            return "\n".join(text_parts)
+    return str(content)
+
+
+def _load_model_env() -> None:
+    """Load local DeepAgents model credentials without overriding the process env."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+
+    load_dotenv(Path.home() / ".deepagents" / ".env", override=False)
+
+
+def _generate_model_reply(model_spec: str, assistant_name: str, message: str) -> str:
+    """Generate a real chat response with the configured model provider.
+
+    Args:
+        model_spec: Provider-qualified model spec, for example
+            `anthropic:MiniMax-M2.7-highspeed`.
+        assistant_name: Human-readable assistant name.
+        message: User message.
+
+    Returns:
+        Normalized assistant reply text.
+    """
+    _load_model_env()
+
+    from deepagents_cli.config import create_model
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    model = create_model(model_spec).model
+    response = model.invoke(
+        [
+            SystemMessage(
+                content=(
+                    f"You are {assistant_name}, a DeepAgents API service assistant. "
+                    "Answer concisely and do not mention implementation internals unless asked."
+                )
+            ),
+            HumanMessage(content=message),
+        ]
+    )
+    return _content_to_text(response.content)
 
 
 def invoke_deepagents_graph(
@@ -59,6 +130,7 @@ def invoke_deepagents_graph(
 
     container_id = None
     execution_result = ""
+    model_reply: str | None = None
 
     # Provision / Reuse the user-scoped container
     if factory and docker_client:
@@ -75,7 +147,7 @@ def invoke_deepagents_graph(
                 res = sandbox.execute(exec_cmd)
                 execution_result = f"\n[Sandbox Execution Output (Exit Code {res.exit_code})]:\n{res.output}"
             else:
-                # Default mock agent execution inside container
+                # Verify the sandbox is live for this user-scoped conversation.
                 sandbox.execute("echo 'Interactive conversation initialized.'")
                 execution_result = f"\n[Sandbox Active] Container {container_id[:12]} verified."
         except Exception as e:
@@ -91,10 +163,23 @@ def invoke_deepagents_graph(
             f"User workspace mapped to '{assistant_dict['base_dir']}'."
         )
 
-    assistant_reply = (
-        f"Hi! I am the assistant '{assistant_dict['name']}' (running model {assistant_dict['model']}). "
-        f"I received your message: '{message}'."
-        f"{execution_result}"
-    )
+    if os.environ.get(ENABLE_MODEL_ENV) == "1" and not message.strip().startswith("run:"):
+        try:
+            model_reply = _generate_model_reply(
+                str(assistant_dict["model"]),
+                str(assistant_dict["name"]),
+                message,
+            )
+        except Exception as e:
+            print(f"[Error] Model invocation failed: {e}")
+            model_reply = f"[Model Warning] Failed to invoke model {assistant_dict['model']}: {e}"
+
+    if model_reply is None:
+        model_reply = (
+            f"Hi! I am the assistant '{assistant_dict['name']}' (running model {assistant_dict['model']}). "
+            f"I received your message: '{message}'."
+        )
+
+    assistant_reply = f"{model_reply}{execution_result}"
 
     return assistant_reply, container_id

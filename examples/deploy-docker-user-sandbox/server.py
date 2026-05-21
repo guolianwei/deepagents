@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from collections.abc import Generator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 import docker
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -32,19 +33,27 @@ from models import (
 )
 
 # Configuration & DB Path
-DB_PATH = Path(__file__).parent / "sandbox_api.db"
+DB_PATH = Path(
+    os.environ.get(
+        "SANDBOX_API_DB_PATH",
+        str(Path(__file__).parent / "sandbox_api.db"),
+    )
+)
 security_bearer = HTTPBearer()
 
 
-def get_db() -> sqlite3.Connection:
+def get_db() -> Generator[sqlite3.Connection, None, None]:
     """Dependency provider for active sqlite3 DB connections.
 
-    Returns:
+    Yields:
         An active sqlite3.Connection with Row representation mapping.
     """
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def init_db() -> None:

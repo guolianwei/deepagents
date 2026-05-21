@@ -227,3 +227,5 @@ libs/cli/TEXTUAL_PROGRESS.md
 
 CLAUDE.md
 .worktrees/
+*.db
+*.db-journal

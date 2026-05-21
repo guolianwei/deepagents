@@ -109,3 +109,51 @@ def test_mocked_docker_sandbox_execution() -> None:
     
     # Clean up factories cache
     sandbox_factories.pop("helper-assistant", None)
+
+
+def test_model_reply_path_uses_configured_model_when_enabled(monkeypatch) -> None:
+    """Test that regular chat can use the real-model code path when enabled."""
+    assistant_dict = {
+        "id": "helper-assistant",
+        "name": "Helper Assistant",
+        "model": "anthropic:MiniMax-M2.7-highspeed",
+        "image": "python:3.12-slim",
+        "base_dir": "/workspace",
+    }
+
+    mock_sandbox = MagicMock()
+    mock_sandbox.id = "container_abc_123"
+    mock_sandbox_holder = MagicMock()
+    mock_sandbox_holder.default = mock_sandbox
+
+    from assistants import sandbox_factories
+
+    sandbox_factories["helper-assistant"] = MagicMock(return_value=mock_sandbox_holder)
+
+    import graph_runtime
+
+    monkeypatch.setenv("DEEPAGENTS_SANDBOX_API_ENABLE_MODEL", "1")
+    monkeypatch.setattr(
+        graph_runtime,
+        "_generate_model_reply",
+        lambda model_spec, assistant_name, message: (
+            f"model={model_spec}; assistant={assistant_name}; message={message}"
+        ),
+    )
+
+    try:
+        reply, container_id = invoke_deepagents_graph(
+            assistant_id="helper-assistant",
+            thread_id="thd_1111",
+            user_id="usr_alice",
+            message="Hello through Minimax",
+            assistant_dict=assistant_dict,
+            docker_client=MagicMock(),
+        )
+    finally:
+        sandbox_factories.pop("helper-assistant", None)
+
+    assert container_id == "container_abc_123"
+    assert "model=anthropic:MiniMax-M2.7-highspeed" in reply
+    assert "message=Hello through Minimax" in reply
+    assert "[Sandbox Active]" in reply

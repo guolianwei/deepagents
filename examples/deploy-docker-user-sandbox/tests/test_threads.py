@@ -31,6 +31,7 @@ def test_thread_creation_and_ownership(db_conn: sqlite3.Connection) -> None:
     thread_2 = create_thread(db_conn, user_a["id"], "coder", "Thread 2")
     
     assert thread_1["thread_id"].startswith("thd_")
+    assert thread_2["thread_id"].startswith("thd_")
     assert thread_1["user_id"] == user_a["id"]
     
     # 3. List threads for User A & User B
